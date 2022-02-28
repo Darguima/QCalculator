@@ -1,4 +1,7 @@
 #include "window.h"
+#include "lexer.h"
+#include "parser.h"
+#include <iostream>
 
 QString removeLastChar(QString string) {
     int charCount = string.length();
@@ -95,6 +98,53 @@ Window::Window(QWidget *parent)
 
     }
 
+double calculate(const Term& term)
+{
+    if (term.m_type == Term::Type::Operation)
+    {
+        auto v1 = calculate(*term.m_operation.m_term1);
+        auto v2 = calculate(*term.m_operation.m_term2);
+        switch (term.m_operation.m_type)
+        {
+        case Operation::Type::Addition:
+            return v1 + v2;
+        case Operation::Type::Subtraction:
+            return v1 - v2;
+        case Operation::Type::Multiplication:
+            return v1 * v2;
+        case Operation::Type::Division:
+            return v1 / v2;
+        }
+    }
+    return term.m_number.m_string.toDouble() * (term.m_number.m_negative ? -1 : 1);
+}
+
+void fprint_term(FILE* file, const Term& term, const char* const parent_node, const int term_num)
+{
+    const auto index = &term;
+    char node[256];
+
+    if (term.m_type == Term::Type::Operation)
+    {
+        snprintf(node, 256, "op_%d_%u", term_num, index);
+        fprintf(file, "\t%s [label=%s]\n", node, term.m_operation.to_string());
+    }
+    else
+    {
+        snprintf(node, 256, "num_%d_%u", term_num, index);
+        fprintf(file, "\t%s [label=%s]\n", node, term.m_number.m_string.toStdString().c_str());
+    }
+
+    if (parent_node)
+        fprintf(file, "\t%s -> %s\n", parent_node, node);
+
+    if (term.m_type == Term::Type::Operation)
+    {
+        fprint_term(file, *term.m_operation.m_term1, node, 1);
+        fprint_term(file, *term.m_operation.m_term2, node, 2);
+    }
+}
+
 void Window::buttonPress(){
     QString calcChar = qobject_cast<QPushButton*>(sender())->text();
 
@@ -110,7 +160,24 @@ void Window::buttonPress(){
 
     else if (calcChar == "=")
     {
-        calculatorScreen->setText("Working on this part");
+        std::cout << std::endl;
+        Lexer lexer{calculatorScreen->text()};
+        const auto tokens = lexer.lex();
+        for (const auto& token : tokens)
+        {
+            std::cout << token.to_string() << std::endl;
+        }
+        Parser parser{tokens};
+        const auto term = parser.parse();
+        auto file = fopen("tree.dot", "w");
+        if (file)
+        {
+            fprintf(file, "digraph {\n");
+            fprint_term(file, *term, 0, 1);
+            fprintf(file, "}\n");
+            fclose(file);
+        }
+        calculatorScreen->setText(QString::number(calculate(*term)));
     }
 
     else
